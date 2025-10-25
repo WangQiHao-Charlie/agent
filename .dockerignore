@@ -1,0 +1,22 @@
+# VCS
+.git
+.github
+
+# Go build
+**/*.test
+**/*.out
+bin/
+dist/
+build/
+
+# Modules cache (not needed in context)
+go.work
+go.work.sum
+
+# Local dev
+.env
+.vscode/
+.idea/
+*.iml
+node_modules/
+
