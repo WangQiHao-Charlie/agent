@@ -1,0 +1,80 @@
+Kube Risc Agent (Hackathon MVP)
+
+Overview
+
+- Watches only NodeAction for the local node via `fieldSelector=spec.nodeName=$(NODE_NAME)`.
+- Resolves InstructionSet. For `runtime=exec`, renders `execTemplate.command` (Go text/template) with `.SubjectID`, `.Params.*`, `.Node.*`, `.Annotations.*` and executes locally (no shell, timeout TERM→KILL). For `runtime=grpc` (or any non-`exec`), calls your external RuntimeDriver gRPC service.
+- Writes back `status.phase/conditions/result{stdoutTail,stderrTail,artifacts}` and emits Events.
+- Concurrency limited with semaphore (default 4) and Prometheus metrics exposed on `:8080/metrics`.
+
+Layout
+
+- `cmd/agent/main.go` — entrypoint, env/flags, metrics server
+- `internal/agent/agent.go` — core watch loop and state machine
+- `internal/execdriver/execdriver.go` — local exec, timeout, tails, artifacts parsing
+- `internal/template/render.go` — strict template renderer (missing keys error)
+- `internal/util/ringbuffer.go` — last-N-bytes buffers for stdout/stderr tails
+- `deploy/` — DaemonSet and RBAC manifests (adjust CRD groups as needed)
+- `examples/` — sample InstructionSet and NodeAction
+
+Configuration
+
+- `NODE_NAME` (required): set via DownwardAPI.
+- `AGENT_CONCURRENCY` (default 4): internal parallelism.
+- `TERM_GRACE_SECONDS` (default 5): after timeout, wait before SIGKILL.
+- `NA_GROUP`/`NA_VERSION`/`NA_RESOURCE`: NodeAction GVR (defaults: `risc.dev/v1alpha1`, `nodeactions`).
+- `IS_GROUP`/`IS_VERSION`/`IS_RESOURCE`: InstructionSet GVR (defaults to `risc.dev/v1alpha1`, `instructionsets`).
+- `METRICS_ADDR` (default `:8080`): metrics endpoint.
+- `DRIVER_ADDR` (optional): when set, enables gRPC driver mode for non-`exec` runtimes. Examples: `unix:///var/run/runtime-driver.sock` or `driver-svc:50051`.
+- `DRIVER_INSECURE` (default `true`): use insecure transport to the driver (set to `false` for TLS).
+
+CRD Expectations (MVP)
+
+- NodeAction.spec fields used: `nodeName`, `instructionRef{runtime,name,instruction}`, `resolvedSubjectID`, `params`, `timeoutSeconds`, `executionID`.
+- NodeAction.status fields written: `phase` (Pending→Running→Succeeded|Failed), `startedAt`, `finishedAt`, `conditions[Executed]`, `result.stdoutTail`, `result.stderrTail`, `result.artifacts`.
+- InstructionSet layout:
+  - For `runtime=exec`: `spec.execTemplates.<runtime>.<instruction>.command: []string` used for argv template rendering.
+  - For `runtime=grpc`: `execTemplate` is not required; only `paramsSchema.properties` is used for param whitelist.
+  - Optional `spec.paramsSchema.properties` for param whitelist (keys only).
+
+Security & RBAC
+
+- Param whitelist: only keys declared under `spec.paramsSchema.properties` are passed to templates.
+- Secret injection (optional): `valueFrom.secretKeyRef` is supported; values are written to temp files and `.Params.<key>` becomes the file path. Files are removed after execution.
+- RBAC: see `deploy/rbac.yaml`. Adjust API groups and resource names to match your CRDs.
+
+Deploy
+
+1. Build and push the image for the agent and update `deploy/daemonset.yaml` image.
+2. Apply RBAC: `kubectl apply -f deploy/rbac.yaml`
+3. Deploy DaemonSet: `kubectl apply -f deploy/daemonset.yaml`
+4. Create an InstructionSet and a NodeAction (examples in `examples/`). Ensure `spec.nodeName` matches the node.
+
+gRPC Runtime Driver
+
+- Proto: service `runtime.v1.RuntimeDriver` with `Execute(ExecuteRequest) returns (ExecuteReply)`. The Go package path is `github.com/WangQiHao-Charlie/driver/api/proto/runtime/v1` (import as `runtimev1`).
+- Agent behavior for `runtime=grpc` or other non-`exec` runtimes:
+  - Passes `instructionRef.instruction` → `ExecuteRequest.instruction`.
+  - Passes `spec.resolvedSubjectID` → `subject_id`.
+  - Passes filtered params (map[string]string) → `params` (non-strings JSON-encoded).
+  - Passes `spec.executionID` → `execution_id` for idempotence.
+  - Uses NodeAction `timeoutSeconds` to bound the RPC; on deadline, marks `Timeout` and fails the action.
+  - Writes driver `exit_code/stdout_tail/stderr_tail/artifacts` to status.
+
+The driver repository is public: `https://github.com/WangQiHao-Charlie/driver`, no special `GOPRIVATE` or token needed.
+
+Notes
+
+- The agent never shells the command; it executes as `execve(argv)` exactly as rendered.
+- Artifacts: if the last stdout line is a JSON object, it is parsed into `status.result.artifacts`.
+- Idempotence: the agent only claims `Pending` actions by transitioning to `Running`. Retries are controlled by the controller via new NodeActions.
+
+Publish to GHCR
+
+- This repo includes a workflow `.github/workflows/publish.yml` that builds multi-arch images (amd64/arm64) and pushes to GHCR using the built-in `GITHUB_TOKEN`.
+- Image name: `ghcr.io/<OWNER>/kuberisc-agent` (owner is your GitHub org/user). Update `deploy/daemonset.yaml` accordingly.
+- Triggers:
+  - Push a tag like `v0.1.0` → publishes tag and `sha` tag.
+  - Push to `main/master` → publishes `latest` and `sha` tag.
+- Manual run: Go to Actions → Publish Image → Run workflow.
+- Dockerfile is in repo root; distroless base, static binary.

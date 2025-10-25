@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kuberisc-agent
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kuberisc-agent
+rules:
+  # NodeAction CRD access (adjust group/version/resource to your CRD)
+  - apiGroups: ["risc.dev"]
+    resources: ["nodeactions", "nodeactions/status"]
+    verbs: ["get", "list", "watch", "update"]
+  # InstructionSet CRD access
+  - apiGroups: ["risc.dev"]
+    resources: ["instructionsets"]
+    verbs: ["get", "list", "watch"]
+  # Read Secrets for valueFrom.secretKeyRef
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  # Emit Events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch", "update"]
+  # Read Node info (optional for template .Node.*)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kuberisc-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kuberisc-agent
+subjects:
+  - kind: ServiceAccount
+    name: kuberisc-agent
+    namespace: default
+

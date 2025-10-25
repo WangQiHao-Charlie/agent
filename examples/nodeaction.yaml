@@ -1,0 +1,17 @@
+apiVersion: risc.dev/v1alpha1
+kind: NodeAction
+metadata:
+  name: demo-nodeaction
+  namespace: default
+spec:
+  nodeName: YOUR_NODE_NAME
+  executionID: demo-exec-001
+  timeoutSeconds: 15
+  resolvedSubjectID: subject-123
+  instructionRef:
+    name: demo-instructionset
+    runtime: exec
+    instruction: echo
+  params:
+    message: world
+

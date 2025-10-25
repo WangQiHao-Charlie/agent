@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kuberisc-agent
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: kuberisc-agent
+  template:
+    metadata:
+      labels:
+        app: kuberisc-agent
+    spec:
+      serviceAccountName: kuberisc-agent
+      containers:
+        - name: agent
+          image: ghcr.io/WangQihao-Charlie/kuberisc-agent:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --metrics-addr=:8080
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: AGENT_CONCURRENCY
+              value: "4"
+            - name: TERM_GRACE_SECONDS
+              value: "5"
+            # gRPC runtime driver endpoint (example using UDS)
+            - name: DRIVER_ADDR
+              value: "unix:///var/run/runtime-driver.sock"
+            - name: DRIVER_INSECURE
+              value: "true"
+            # Configure CRD GVRs if different from defaults
+            - name: NA_GROUP
+              value: "risc.dev"
+            - name: NA_VERSION
+              value: "v1alpha1"
+            - name: NA_RESOURCE
+              value: "nodeactions"
+            - name: IS_GROUP
+              value: "risc.dev"
+            - name: IS_VERSION
+              value: "v1alpha1"
+            - name: IS_RESOURCE
+              value: "instructionsets"
+          ports:
+            - name: metrics
+              containerPort: 8080
+          volumeMounts:
+            - name: driver-binaries
+              mountPath: /opt/driver
+              readOnly: true
+            - name: driver-sock
+              mountPath: /var/run
+      volumes:
+        # Mount local driver binaries if needed (adjust as required)
+        - name: driver-binaries
+          hostPath:
+            path: /opt/driver
+            type: DirectoryOrCreate
+        # Mount the driver socket directory (if using UDS)
+        - name: driver-sock
+          hostPath:
+            path: /var/run
+            type: Directory
