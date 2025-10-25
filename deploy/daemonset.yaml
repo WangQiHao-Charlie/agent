@@ -26,8 +26,6 @@ spec:
                   fieldPath: spec.nodeName
             - name: AGENT_CONCURRENCY
               value: "4"
-            - name: TERM_GRACE_SECONDS
-              value: "5"
             # gRPC runtime driver endpoint (example using UDS)
             - name: DRIVER_ADDR
               value: "unix:///var/run/runtime-driver.sock"

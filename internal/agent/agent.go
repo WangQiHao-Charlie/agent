@@ -25,9 +25,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 
-	"github.com/hackohio/agent/internal/driver"
-	"github.com/hackohio/agent/internal/execdriver"
-	tpl "github.com/hackohio/agent/internal/template"
+    "github.com/hackohio/agent/internal/driver"
+    tpl "github.com/hackohio/agent/internal/template"
 )
 
 type GVR struct {
@@ -41,13 +40,12 @@ func (g GVR) ToSchema() schema.GroupVersionResource {
 }
 
 type Config struct {
-	NodeName                 string
-	Concurrency              int
-	NodeActionGVR            GVR
-	InstructionSetGVR        GVR
-	TerminationGraceDuration time.Duration
-	DriverAddr               string
-	DriverInsecure           bool
+    NodeName                 string
+    Concurrency              int
+    NodeActionGVR            GVR
+    InstructionSetGVR        GVR
+    DriverAddr               string
+    DriverInsecure           bool
 }
 
 type Agent struct {
@@ -252,52 +250,64 @@ func (a *Agent) processOne(ctx context.Context, u *unstructured.Unstructured) er
 		timedOut  bool
 	)
 
-	switch strings.ToLower(ir.Runtime) {
-	case "exec":
-		// Optional: fetch Node annotations/labels for template.
-		node, err := a.clientset.CoreV1().Nodes().Get(ctx, a.cfg.NodeName, metav1.GetOptions{})
-		if err != nil {
-			node = &corev1.Node{}
-		}
-		// Resolve execTemplate.command []string
-		cmdTmpls, err := extractCommandTemplates(isObj, ir.Runtime, ir.Instruction)
-		if err != nil {
-			return a.finishWithError(ctx, claimed, fmt.Errorf("extract execTemplate: %w", err))
-		}
-		// Render command
-		data := map[string]any{
-			"SubjectID": subjectID,
-			"Params":    injected,
-			"Node": map[string]any{
-				"Name":        node.Name,
-				"Labels":      node.Labels,
-				"Annotations": node.Annotations,
-			},
-			"Annotations": claimed.GetAnnotations(),
-		}
-		cmd, err := tpl.RenderCommandTemplates(cmdTmpls, data)
-		if err != nil {
-			return a.finishWithError(ctx, claimed, fmt.Errorf("render command: %w", err))
-		}
-		r, err := execdriver.Exec(execCtx, executionID, cmd, addDefaultEnv(executionID, a.cfg.NodeName), 4096, a.cfg.TerminationGraceDuration)
-		if err != nil {
-			return a.finishWithError(ctx, claimed, fmt.Errorf("exec: %w", err))
-		}
-		stdout = r.StdoutTail
-		stderr = r.StderrTail
-		exitCode = r.ExitCode
-		timedOut = r.TimedOut
-		// Parse artifacts from last stdout line if JSON
-		if strings.TrimSpace(r.StdoutLastLine) != "" {
-			var m map[string]any
-			if json.Unmarshal([]byte(r.StdoutLastLine), &m) == nil {
-				artifacts = m
-			}
-		}
-	default:
-		if a.grpcDriver == nil {
-			return a.finishWithError(ctx, claimed, errors.New("grpc driver not configured (DRIVER_ADDR)"))
-		}
+    switch strings.ToLower(ir.Runtime) {
+    case "exec":
+        // Render exec template locally, but delegate execution to gRPC driver.
+        if a.grpcDriver == nil {
+            return a.finishWithError(ctx, claimed, errors.New("grpc driver not configured (DRIVER_ADDR)"))
+        }
+        // Optional: fetch Node annotations/labels for template.
+        node, err := a.clientset.CoreV1().Nodes().Get(ctx, a.cfg.NodeName, metav1.GetOptions{})
+        if err != nil {
+            node = &corev1.Node{}
+        }
+        // Resolve and render execTemplate.command []string
+        cmdTmpls, err := extractCommandTemplates(isObj, ir.Runtime, ir.Instruction)
+        if err != nil {
+            return a.finishWithError(ctx, claimed, fmt.Errorf("extract execTemplate: %w", err))
+        }
+        data := map[string]any{
+            "SubjectID": subjectID,
+            "Params":    injected,
+            "Node": map[string]any{
+                "Name":        node.Name,
+                "Labels":      node.Labels,
+                "Annotations": node.Annotations,
+            },
+            "Annotations": claimed.GetAnnotations(),
+        }
+        argv, err := tpl.RenderCommandTemplates(cmdTmpls, data)
+        if err != nil {
+            return a.finishWithError(ctx, claimed, fmt.Errorf("render command: %w", err))
+        }
+        // Pass rendered argv to driver via special param `_argv` (JSON array string).
+        sparams := stringifyParams(injected)
+        if b, err := json.Marshal(argv); err == nil {
+            sparams["_argv"] = string(b)
+        }
+        r, err := a.grpcDriver.Execute(execCtx, ir.Instruction, subjectID, executionID, sparams)
+        if err != nil {
+            if errors.Is(err, context.DeadlineExceeded) || errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+                timedOut = true
+            } else {
+                return a.finishWithError(ctx, claimed, fmt.Errorf("driver execute: %w", err))
+            }
+        } else {
+            stdout = r.StdoutTail
+            stderr = r.StderrTail
+            exitCode = int(r.ExitCode)
+            if r.Artifacts != nil {
+                ma := make(map[string]any, len(r.Artifacts))
+                for k, v := range r.Artifacts {
+                    ma[k] = v
+                }
+                artifacts = ma
+            }
+        }
+    default:
+        if a.grpcDriver == nil {
+            return a.finishWithError(ctx, claimed, errors.New("grpc driver not configured (DRIVER_ADDR)"))
+        }
 		// stringify injected params to strings
 		sparams := stringifyParams(injected)
 		r, err := a.grpcDriver.Execute(execCtx, ir.Instruction, subjectID, executionID, sparams)
@@ -573,14 +583,6 @@ func mergeStatus(dst *unstructured.Unstructured, src map[string]any) {
 			_ = unstructured.SetNestedField(dst.Object, v, "status", k)
 		}
 	}
-}
-
-func addDefaultEnv(executionID, nodeName string) []string {
-	env := []string{
-		"RISC_EXECUTION_ID=" + executionID,
-		"NODE_NAME=" + nodeName,
-	}
-	return env
 }
 
 func stringifyParams(params map[string]any) map[string]string {

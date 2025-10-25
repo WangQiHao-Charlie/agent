@@ -22,18 +22,17 @@ func getenv(key, def string) string {
 
 func main() {
     var (
-        nodeName     = getenv("NODE_NAME", "")
-        concurrency  = getenv("AGENT_CONCURRENCY", "4")
-        naGroup      = getenv("NA_GROUP", "risc.dev")
-        naVersion    = getenv("NA_VERSION", "v1alpha1")
-        naResource   = getenv("NA_RESOURCE", "nodeactions")
-        isGroup      = getenv("IS_GROUP", naGroup)
-        isVersion    = getenv("IS_VERSION", naVersion)
-        isResource   = getenv("IS_RESOURCE", "instructionsets")
-        metricsAddr  = getenv("METRICS_ADDR", ":8080")
-        driverAddr   = getenv("DRIVER_ADDR", "")
-        driverInsec  = getenv("DRIVER_INSECURE", "true")
-        termGraceSec = getenv("TERM_GRACE_SECONDS", "5")
+        nodeName    = getenv("NODE_NAME", "")
+        concurrency = getenv("AGENT_CONCURRENCY", "4")
+        naGroup     = getenv("NA_GROUP", "risc.dev")
+        naVersion   = getenv("NA_VERSION", "v1alpha1")
+        naResource  = getenv("NA_RESOURCE", "nodeactions")
+        isGroup     = getenv("IS_GROUP", naGroup)
+        isVersion   = getenv("IS_VERSION", naVersion)
+        isResource  = getenv("IS_RESOURCE", "instructionsets")
+        metricsAddr = getenv("METRICS_ADDR", ":8080")
+        driverAddr  = getenv("DRIVER_ADDR", "")
+        driverInsec = getenv("DRIVER_INSECURE", "true")
     )
 
     // Allow overriding via flags as well (useful for local dev)
@@ -47,7 +46,6 @@ func main() {
     flag.StringVar(&metricsAddr, "metrics-addr", metricsAddr, "HTTP listen addr for metrics")
     flag.StringVar(&driverAddr, "driver-addr", driverAddr, "gRPC runtime driver address (e.g. unix:///var/run/runtime-driver.sock or host:port)")
     flag.StringVar(&driverInsec, "driver-insecure", driverInsec, "use insecure transport for driver (true/false)")
-    flag.StringVar(&termGraceSec, "term-grace-seconds", termGraceSec, "Seconds to wait after SIGTERM before SIGKILL")
     flag.Parse()
 
     if nodeName == "" {
@@ -58,13 +56,13 @@ func main() {
     if err != nil || conc <= 0 {
         conc = 4
     }
-    grace, err := strconv.Atoi(termGraceSec)
-    if err != nil || grace < 0 {
-        grace = 5
-    }
     insec := true
     if b, err := strconv.ParseBool(driverInsec); err == nil {
         insec = b
+    }
+
+    if driverAddr == "" {
+        log.Fatalf("DRIVER_ADDR is required: gRPC runtime driver address must be set")
     }
 
     // Start metrics HTTP server
@@ -83,7 +81,6 @@ func main() {
         Concurrency:              conc,
         NodeActionGVR:            agent.GVR{Group: naGroup, Version: naVersion, Resource: naResource},
         InstructionSetGVR:        agent.GVR{Group: isGroup, Version: isVersion, Resource: isResource},
-        TerminationGraceDuration: time.Duration(grace) * time.Second,
         DriverAddr:               driverAddr,
         DriverInsecure:           insec,
     }

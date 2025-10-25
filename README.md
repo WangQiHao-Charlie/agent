@@ -3,7 +3,7 @@ Kube Risc Agent (Hackathon MVP)
 Overview
 
 - Watches only NodeAction for the local node via `fieldSelector=spec.nodeName=$(NODE_NAME)`.
-- Resolves InstructionSet. For `runtime=exec`, renders `execTemplate.command` (Go text/template) with `.SubjectID`, `.Params.*`, `.Node.*`, `.Annotations.*` and executes locally (no shell, timeout TERM→KILL). For `runtime=grpc` (or any non-`exec`), calls your external RuntimeDriver gRPC service.
+- Resolves InstructionSet. For all runtimes (including `exec`), the agent calls your external RuntimeDriver gRPC service. For `runtime=exec`, it renders `execTemplate.command` (Go text/template) with `.SubjectID`, `.Params.*`, `.Node.*`, `.Annotations.*`, then passes the rendered argv to the driver in `params["_argv"]` as a JSON array string. The driver performs the actual execution.
 - Writes back `status.phase/conditions/result{stdoutTail,stderrTail,artifacts}` and emits Events.
 - Concurrency limited with semaphore (default 4) and Prometheus metrics exposed on `:8080/metrics`.
 
@@ -11,7 +11,6 @@ Layout
 
 - `cmd/agent/main.go` — entrypoint, env/flags, metrics server
 - `internal/agent/agent.go` — core watch loop and state machine
-- `internal/execdriver/execdriver.go` — local exec, timeout, tails, artifacts parsing
 - `internal/template/render.go` — strict template renderer (missing keys error)
 - `internal/util/ringbuffer.go` — last-N-bytes buffers for stdout/stderr tails
 - `deploy/` — DaemonSet and RBAC manifests (adjust CRD groups as needed)
@@ -21,11 +20,10 @@ Configuration
 
 - `NODE_NAME` (required): set via DownwardAPI.
 - `AGENT_CONCURRENCY` (default 4): internal parallelism.
-- `TERM_GRACE_SECONDS` (default 5): after timeout, wait before SIGKILL.
 - `NA_GROUP`/`NA_VERSION`/`NA_RESOURCE`: NodeAction GVR (defaults: `risc.dev/v1alpha1`, `nodeactions`).
 - `IS_GROUP`/`IS_VERSION`/`IS_RESOURCE`: InstructionSet GVR (defaults to `risc.dev/v1alpha1`, `instructionsets`).
 - `METRICS_ADDR` (default `:8080`): metrics endpoint.
-- `DRIVER_ADDR` (optional): when set, enables gRPC driver mode for non-`exec` runtimes. Examples: `unix:///var/run/runtime-driver.sock` or `driver-svc:50051`.
+- `DRIVER_ADDR` (required): gRPC driver address. Examples: `unix:///var/run/runtime-driver.sock` or `driver-svc:50051`.
 - `DRIVER_INSECURE` (default `true`): use insecure transport to the driver (set to `false` for TLS).
 
 CRD Expectations (MVP)
@@ -53,10 +51,11 @@ Deploy
 gRPC Runtime Driver
 
 - Proto: service `runtime.v1.RuntimeDriver` with `Execute(ExecuteRequest) returns (ExecuteReply)`. The Go package path is `github.com/WangQiHao-Charlie/driver/api/proto/runtime/v1` (import as `runtimev1`).
-- Agent behavior for `runtime=grpc` or other non-`exec` runtimes:
+- Agent behavior for all runtimes (including `exec`):
   - Passes `instructionRef.instruction` → `ExecuteRequest.instruction`.
   - Passes `spec.resolvedSubjectID` → `subject_id`.
   - Passes filtered params (map[string]string) → `params` (non-strings JSON-encoded).
+  - For `runtime=exec`, additionally passes `params["_argv"]` containing the rendered argv as a JSON array string (driver should interpret and execute this argv).
   - Passes `spec.executionID` → `execution_id` for idempotence.
   - Uses NodeAction `timeoutSeconds` to bound the RPC; on deadline, marks `Timeout` and fails the action.
   - Writes driver `exit_code/stdout_tail/stderr_tail/artifacts` to status.
@@ -65,8 +64,7 @@ The driver repository is public: `https://github.com/WangQiHao-Charlie/driver`, 
 
 Notes
 
-- The agent never shells the command; it executes as `execve(argv)` exactly as rendered.
-- Artifacts: if the last stdout line is a JSON object, it is parsed into `status.result.artifacts`.
+- The agent no longer executes commands locally. For `runtime=exec`, argv is rendered and handed off to the gRPC driver via `_argv`.
 - Idempotence: the agent only claims `Pending` actions by transitioning to `Running`. Retries are controlled by the controller via new NodeActions.
 
 Publish to GHCR
