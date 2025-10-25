@@ -25,6 +25,7 @@ Configuration
 - `METRICS_ADDR` (default `:8080`): metrics endpoint.
 - `DRIVER_ADDR` (required): gRPC driver address. Examples: `unix:///var/run/runtime-driver.sock` or `driver-svc:50051`.
 - `DRIVER_INSECURE` (default `true`): use insecure transport to the driver (set to `false` for TLS).
+- `NA_NODE_LABEL` (optional): label key used for server-side filtering via labelSelector. If set (e.g. `risc.dev/node`), the agent lists/watches NodeActions with `labelSelector="<key>=<NODE_NAME>"`. Ensure your NodeAction objects include `metadata.labels[<key>]=<NODE_NAME>`.
 
 CRD Expectations (MVP)
 
@@ -47,6 +48,7 @@ Deploy
 2. Apply RBAC: `kubectl apply -f deploy/rbac.yaml`
 3. Deploy DaemonSet: `kubectl apply -f deploy/daemonset.yaml`
 4. Create an InstructionSet and a NodeAction (examples in `examples/`). Ensure `spec.nodeName` matches the node.
+   - If you set `NA_NODE_LABEL`, also add the label to your NodeAction, for example: `metadata.labels["risc.dev/node"]=<nodeName>`.
 
 gRPC Runtime Driver
 

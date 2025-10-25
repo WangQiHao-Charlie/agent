@@ -15,7 +15,7 @@ spec:
       serviceAccountName: kuberisc-agent
       containers:
         - name: agent
-          image: ghcr.io/WangQihao-Charlie/kuberisc-agent:latest
+          image: ghcr.io/wangqihao-charlie/kuberisc-agent:latest
           imagePullPolicy: IfNotPresent
           args:
             - --metrics-addr=:8080
@@ -24,11 +24,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            - name: AGENT_CONCURRENCY
-              value: "4"
-            # gRPC runtime driver endpoint (example using UDS)
-            - name: DRIVER_ADDR
-              value: "unix:///var/run/runtime-driver.sock"
+        - name: AGENT_CONCURRENCY
+          value: "4"
+        # Optional: use labelSelector for server-side filtering (recommended for CRDs)
+        - name: NA_NODE_LABEL
+          value: "risc.dev/node"
+        # gRPC runtime driver endpoint (using UDS on host)
+        - name: DRIVER_ADDR
+          value: "unix:///var/run/driverd/runtime-driver.grpc"
             - name: DRIVER_INSECURE
               value: "true"
             # Configure CRD GVRs if different from defaults
@@ -48,19 +51,11 @@ spec:
             - name: metrics
               containerPort: 8080
           volumeMounts:
-            - name: driver-binaries
-              mountPath: /opt/driver
-              readOnly: true
             - name: driver-sock
-              mountPath: /var/run
+              mountPath: /var/run/driverd
       volumes:
-        # Mount local driver binaries if needed (adjust as required)
-        - name: driver-binaries
-          hostPath:
-            path: /opt/driver
-            type: DirectoryOrCreate
-        # Mount the driver socket directory (if using UDS)
+        # Mount the driver socket directory from the host
         - name: driver-sock
           hostPath:
-            path: /var/run
+            path: /var/run/driverd
             type: Directory

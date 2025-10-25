@@ -33,6 +33,7 @@ func main() {
         metricsAddr = getenv("METRICS_ADDR", ":8080")
         driverAddr  = getenv("DRIVER_ADDR", "")
         driverInsec = getenv("DRIVER_INSECURE", "true")
+        naNodeLabel = getenv("NA_NODE_LABEL", "")
     )
 
     // Allow overriding via flags as well (useful for local dev)
@@ -46,6 +47,7 @@ func main() {
     flag.StringVar(&metricsAddr, "metrics-addr", metricsAddr, "HTTP listen addr for metrics")
     flag.StringVar(&driverAddr, "driver-addr", driverAddr, "gRPC runtime driver address (e.g. unix:///var/run/runtime-driver.sock or host:port)")
     flag.StringVar(&driverInsec, "driver-insecure", driverInsec, "use insecure transport for driver (true/false)")
+    flag.StringVar(&naNodeLabel, "na-node-label", naNodeLabel, "optional label key for server-side filtering of NodeActions, e.g. risc.dev/node")
     flag.Parse()
 
     if nodeName == "" {
@@ -83,6 +85,7 @@ func main() {
         InstructionSetGVR:        agent.GVR{Group: isGroup, Version: isVersion, Resource: isResource},
         DriverAddr:               driverAddr,
         DriverInsecure:           insec,
+        NodeLabelKey:             naNodeLabel,
     }
 
     ag, err := agent.New(context.Background(), cfg)

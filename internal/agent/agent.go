@@ -46,6 +46,8 @@ type Config struct {
     InstructionSetGVR        GVR
     DriverAddr               string
     DriverInsecure           bool
+    // Optional: label key to use for server-side filtering, e.g. "risc.dev/node"
+    NodeLabelKey             string
 }
 
 type Agent struct {
@@ -98,23 +100,61 @@ func New(ctx context.Context, cfg Config) (*Agent, error) {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
-	// Initial list
-	fieldSel := fields.OneTermEqualSelector("spec.nodeName", a.cfg.NodeName).String()
-	listOpts := metav1.ListOptions{FieldSelector: fieldSel}
-	list, err := a.naRes.Namespace(metav1.NamespaceAll).List(ctx, listOpts)
-	if err != nil {
-		return fmt.Errorf("list NodeActions: %w", err)
-	}
+    // Initial list. Prefer server-side filtering via labelSelector if configured.
+    var (
+        useFieldSel bool
+        listOpts    metav1.ListOptions
+    )
+    if a.cfg.NodeLabelKey != "" {
+        listOpts = metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", a.cfg.NodeLabelKey, a.cfg.NodeName)}
+    } else {
+        // Fall back to server-side field selector; may be unsupported by CRDs.
+        fieldSel := fields.OneTermEqualSelector("spec.nodeName", a.cfg.NodeName).String()
+        useFieldSel = true
+        listOpts = metav1.ListOptions{FieldSelector: fieldSel}
+    }
+    list, err := a.naRes.Namespace(metav1.NamespaceAll).List(ctx, listOpts)
+    if err != nil && useFieldSel {
+        // Some API servers/CRDs do not support field selectors on spec.*. Fallback gracefully.
+        if strings.Contains(err.Error(), "field label not supported") || strings.Contains(err.Error(), "field selector not supported") {
+            log.Printf("field selector on spec.nodeName unsupported; falling back to client-side filtering")
+            useFieldSel = false
+            listOpts = metav1.ListOptions{}
+            list, err = a.naRes.Namespace(metav1.NamespaceAll).List(ctx, listOpts)
+        }
+    }
+    if err != nil {
+        return fmt.Errorf("list NodeActions: %w", err)
+    }
 	for i := range list.Items {
 		u := list.Items[i].DeepCopy()
 		go a.handleEvent(ctx, "LIST", u)
 	}
-	// Watch
-	listOpts.ResourceVersion = list.GetResourceVersion()
-	w, err := a.naRes.Namespace(metav1.NamespaceAll).Watch(ctx, listOpts)
-	if err != nil {
-		return fmt.Errorf("watch NodeActions: %w", err)
-	}
+    // Watch
+    listOpts.ResourceVersion = list.GetResourceVersion()
+    var w watch.Interface
+    if a.cfg.NodeLabelKey != "" {
+        // Label selectors are universally supported for CRDs.
+        w, err = a.naRes.Namespace(metav1.NamespaceAll).Watch(ctx, listOpts)
+    } else if useFieldSel {
+        var werr error
+        w, werr = a.naRes.Namespace(metav1.NamespaceAll).Watch(ctx, listOpts)
+        if werr != nil {
+            // Fallback if watch with field selector is not supported
+            if strings.Contains(werr.Error(), "field label not supported") || strings.Contains(werr.Error(), "field selector not supported") {
+                log.Printf("watch with field selector unsupported; watching all and filtering client-side")
+                useFieldSel = false
+                w, err = a.naRes.Namespace(metav1.NamespaceAll).Watch(ctx, metav1.ListOptions{ResourceVersion: list.GetResourceVersion()})
+            } else {
+                err = werr
+            }
+        }
+    } else {
+        w, err = a.naRes.Namespace(metav1.NamespaceAll).Watch(ctx, metav1.ListOptions{ResourceVersion: list.GetResourceVersion()})
+    }
+    if err != nil {
+        return fmt.Errorf("watch NodeActions: %w", err)
+    }
 	for ev := range w.ResultChan() {
 		if ev.Type == watch.Error {
 			// watch error; break and let caller restart (or just continue)
@@ -132,11 +172,15 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 func (a *Agent) handleEvent(ctx context.Context, _ string, u *unstructured.Unstructured) {
-	phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
-	if phase != "" && phase != "Pending" {
-		return
-	}
-	// Acquire semaphore
+    // If we are client-side filtering, skip objects for other nodes early.
+    if !a.matchesNode(u) {
+        return
+    }
+    phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
+    if phase != "" && phase != "Pending" {
+        return
+    }
+    // Acquire semaphore
 	a.semaphore <- struct{}{}
 	go func() {
 		defer func() { <-a.semaphore }()
@@ -153,17 +197,21 @@ type instructionRef struct {
 }
 
 func (a *Agent) processOne(ctx context.Context, u *unstructured.Unstructured) error {
-	ns, name := u.GetNamespace(), u.GetName()
-	// Reload before claim
-	fresh, err := a.naRes.Namespace(ns).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("get NodeAction: %w", err)
-	}
-	// Only handle Pending
-	curPhase, _, _ := unstructured.NestedString(fresh.Object, "status", "phase")
-	if curPhase != "" && curPhase != "Pending" {
-		return nil
-	}
+    ns, name := u.GetNamespace(), u.GetName()
+    // Reload before claim
+    fresh, err := a.naRes.Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+    if err != nil {
+        return fmt.Errorf("get NodeAction: %w", err)
+    }
+    // Ensure this action targets our node before attempting to claim
+    if !a.matchesNode(fresh) {
+        return nil
+    }
+    // Only handle Pending
+    curPhase, _, _ := unstructured.NestedString(fresh.Object, "status", "phase")
+    if curPhase != "" && curPhase != "Pending" {
+        return nil
+    }
 
 	// Claim: phase -> Running, startedAt
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -608,4 +656,21 @@ func stringifyParams(params map[string]any) map[string]string {
 		}
 	}
 	return out
+}
+
+// matchesNode checks whether the object targets this agent's node either by spec.nodeName
+// or by matching metadata.labels[NodeLabelKey] when configured.
+func (a *Agent) matchesNode(u *unstructured.Unstructured) bool {
+    if a.cfg.NodeLabelKey != "" {
+        if labels := u.GetLabels(); labels != nil {
+            if v, ok := labels[a.cfg.NodeLabelKey]; ok && v == a.cfg.NodeName {
+                return true
+            }
+        }
+    }
+    if nn, _, _ := unstructured.NestedString(u.Object, "spec", "nodeName"); nn != "" && nn == a.cfg.NodeName {
+        return true
+    }
+    // If neither is set, do not match.
+    return false
 }

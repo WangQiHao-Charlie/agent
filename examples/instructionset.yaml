@@ -1,19 +1,40 @@
-apiVersion: risc.dev/v1alpha1
-kind: InstructionSet
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
 metadata:
-  name: demo-instructionset
+  name: instructionsets.risc.dev
 spec:
-  paramsSchema:
-    type: object
-    properties:
-      message:
-        type: string
-      token:
-        type: string
-  execTemplates:
-    exec:
-      echo:
-        command:
-          - /bin/echo
-          - "Hello {{ .Params.message }} for {{ .SubjectID }}"
-
+  group: risc.dev
+  scope: Cluster
+  names:
+    plural: instructionsets
+    singular: instructionset
+    kind: InstructionSet
+    shortNames: [is]
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              runtime: { type: string }
+              version: { type: string }
+              instructions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name: { type: string }   # 指令名（如 echo / snapshot）
+                    driver:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true  # 放宽，便于 MVP
+                    execTemplate:
+                      type: object
+                      properties:
+                        command:
+                          type: array
+                          items: { type: string }
