@@ -1,0 +1,17 @@
+apiVersion: risc.dev/v1alpha1
+kind: InstructionSet
+metadata:
+  name: demo-instructionset
+spec:
+  paramsSchema:
+    type: object
+    properties:
+      message:
+        type: string
+  execTemplates:
+    exec:
+      echo:
+        command:
+          - /bin/echo
+          - "Hello {{ .Params.message }} for {{ .SubjectID }}"
+

@@ -1,0 +1,20 @@
+apiVersion: risc.dev/v1alpha1
+kind: NodeAction
+metadata:
+  name: demo-nodeaction-grpc
+  namespace: default
+  labels:
+    risc.dev/node: general-worker-3
+spec:
+  nodeName: general-worker-3
+  executionID: demo-exec-002
+  timeoutSeconds: 20
+  resolvedSubjectID: subject-xyz
+  instructionRef:
+    name: demo-instructionset # used for param schema whitelist
+    runtime: grpc
+    instruction: snapshot
+  params:
+    target: /data/vol1
+    compress: "true"
+

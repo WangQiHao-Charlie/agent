@@ -16,6 +16,32 @@ Layout
 - `deploy/` — DaemonSet and RBAC manifests (adjust CRD groups as needed)
 - `examples/` — sample InstructionSet and NodeAction
 
+Firecracker Example (firectl)
+
+- A minimal Firecracker InstructionSet is provided: `examples/instructionset-firecracker.yaml` (runtime `exec`). It defines a `run` instruction using `/usr/local/bin/firectl` with `kernel/rootfs/vcpu/memMiB` params, and derives the API socket path from `.SubjectID`.
+- Try it (replace `YOUR_NODE_NAME`):
+  - `kubectl apply -f examples/instructionset-firecracker.yaml`
+  - `kubectl apply -f examples/nodeaction-firecracker-run.yaml`
+  - `kubectl get nodeaction -A` and watch `status.phase`/`result.*`
+- Driver note: ensure the Runtime Driver allows and executes the rendered argv (add `/usr/local/bin/firectl` to its binary allowlist, or route `_argv`). For pause/resume/snapshot/restore you typically need to call Firecracker's API (e.g., via curl) — extend your InstructionSet/Driver as needed.
+
+Wasmtime Example
+
+- A minimal Wasmtime InstructionSet is provided: `examples/instructionset-wasmtime.yaml` (runtime `exec`). It defines a `run` instruction using `/usr/bin/wasmtime` and requires a single param `module` (absolute path to the `.wasm` inside the Driver pod).
+- ActionRequest sample to run a hello world: `examples/actionrequest-wasmtime-hello.yaml`. Label a pod in the same namespace with `app=demo` and ensure the module is mounted at `/opt/wasm/hello.wasm` in the Driver container.
+- Driver note: add `/usr/bin/wasmtime` to the Driver binary allowlist. The agent renders argv and sends it via `params["_argv"]`.
+
+Wasmtime over OCI (Driver pulls module)
+
+- InstructionSet (gRPC runtime): `examples/instructionset-wasmtime-oci.yaml`
+  - Params: `moduleRef` (oci://...), `moduleDigest` (sha256:...), optional `args`.
+  - Agent will NOT render argv for `runtime=grpc`; it passes params to the Runtime Driver.
+- ActionRequest sample: `examples/actionrequest-wasmtime-oci-hello.yaml`
+- Driver requirements:
+  - Implement fetching `moduleRef` from an OCI registry, verify `moduleDigest`, cache locally (e.g., `/var/lib/kuberisc/modules/<sha256>.wasm`).
+  - Execute via `/usr/bin/wasmtime <cached_path> [args...]` and return stdout/stderr tail.
+  - Restrict allowed registries and enable auth if needed.
+
 Configuration
 
 - `NODE_NAME` (required): set via DownwardAPI.
@@ -47,6 +73,8 @@ Deploy
 1. Build and push the image for the agent and update `deploy/daemonset.yaml` image.
 2. Apply RBAC: `kubectl apply -f deploy/rbac.yaml`
 3. Deploy DaemonSet: `kubectl apply -f deploy/daemonset.yaml`
+4. Expose metrics for Prometheus scraping: `kubectl apply -f deploy/metrics-service.yaml`
+5. If Prometheus Operator is installed, create a ServiceMonitor: `kubectl apply -f deploy/servicemonitor.yaml`
 4. Create an InstructionSet and a NodeAction (examples in `examples/`). Ensure `spec.nodeName` matches the node.
    - If you set `NA_NODE_LABEL`, also add the label to your NodeAction, for example: `metadata.labels["risc.dev/node"]=<nodeName>`.
 
@@ -68,6 +96,14 @@ Notes
 
 - The agent no longer executes commands locally. For `runtime=exec`, argv is rendered and handed off to the gRPC driver via `_argv`.
 - Idempotence: the agent only claims `Pending` actions by transitioning to `Running`. Retries are controlled by the controller via new NodeActions.
+
+Grafana (optional)
+
+- A ready-to-use Grafana stack is provided under `../grafana/` with:
+  - Prometheus datasource (expects `prometheus-k8s.monitoring.svc:9090`, as in kube-prometheus-stack)
+  - A "KubeRISC NodeActions" dashboard (success rate, duration quantiles, active actions)
+- Apply Grafana: `kubectl apply -k ../grafana`
+- Access: `kubectl -n monitoring port-forward svc/grafana 3000:3000` then open http://localhost:3000 (anonymous viewer enabled; admin password `admin`).
 
 Publish to GHCR
 

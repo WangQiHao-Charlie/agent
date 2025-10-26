@@ -1,0 +1,23 @@
+apiVersion: risc.dev/v1alpha1
+kind: InstructionSet
+metadata:
+  name: wasmtime-oci
+spec:
+  runtime: grpc
+  version: v0.1.0
+  # Whitelist params the driver will consume
+  paramsSchema:
+    type: object
+    properties:
+      moduleRef:
+        type: string
+        description: OCI artifact ref, e.g. oci://ghcr.io/org/hello-wasm:1.0
+      moduleDigest:
+        type: string
+        description: Expected digest, e.g. sha256:...
+      args:
+        type: array
+        items:
+          type: string
+        description: Optional argv for the module
+

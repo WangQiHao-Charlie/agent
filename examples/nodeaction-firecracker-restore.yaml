@@ -1,0 +1,20 @@
+# NOTE: This example expects an InstructionSet with a `restore` instruction.
+# The firectl-based example (examples/instructionset-firecracker.yaml) only defines `run` for now.
+# Keep this file if you plan to extend the InstructionSet to call Firecracker's API for restore.
+apiVersion: risc.dev/v1alpha1
+kind: NodeAction
+metadata:
+  name: firecracker-restore-demo
+  namespace: default
+  labels:
+    risc.dev/node: "YOUR_NODE_NAME"
+spec:
+  nodeName: "YOUR_NODE_NAME"
+  executionID: fc-restore-001
+  timeoutSeconds: 30
+  resolvedSubjectID: vm-001
+  instructionRef:
+    name: firecracker
+    runtime: exec
+    instruction: restore
+  params: {}

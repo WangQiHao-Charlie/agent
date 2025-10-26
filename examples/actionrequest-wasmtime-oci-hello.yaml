@@ -1,0 +1,25 @@
+apiVersion: risc.dev/v1alpha1
+kind: ActionRequest
+metadata:
+  name: wasmtime-oci-hello
+  namespace: default
+spec:
+  instructionRef:
+    name: wasmtime-oci
+    runtime: grpc
+    instruction: run
+  params:
+    moduleRef: oci://ghcr.io/YOUR_ORG/hello-wasm:1.0
+    moduleDigest: sha256:REPLACE_WITH_REAL_DIGEST
+    args: ["--flag", "value"]
+  selector:
+    podSelector:
+      app: demo
+  strategy:
+    parallelism: 1
+    retryLimit: 0
+    completionPolicy:
+      type: All
+  timeoutSeconds: 60
+  ttlSecondsAfterFinished: 60
+

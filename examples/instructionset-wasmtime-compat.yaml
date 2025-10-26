@@ -1,0 +1,17 @@
+apiVersion: risc.dev/v1alpha1
+kind: InstructionSet
+metadata:
+  name: wasmtime
+spec:
+  runtime: exec
+  version: v0.1.0
+  instructions:
+  - name: run
+    # driver.mode is optional metadata in this CRD; agent will render execTemplate when runtime=exec
+    driver:
+      mode: exec
+    execTemplate:
+      command:
+        - /usr/bin/wasmtime
+        - "{{ .Params.module }}"
+

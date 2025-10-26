@@ -490,7 +490,10 @@ func nestedStringOr(obj map[string]any, def string, fields ...string) string {
 }
 
 // extractCommandTemplates looks for spec.execTemplates[runtime][instruction].command (preferred),
-// falling back to spec.instructions[...].execTemplate.command if present.
+// falling back to spec.instructions[...].execTemplate.command.
+// The fallback accepts two shapes for each instruction item:
+//   A) explicit fields:   { runtime: <str>, instruction: <str>, execTemplate: { command: []string } }
+//   B) controller CRD v1alpha1: { name: <str>, execTemplate: { command: []string } } with runtime at spec.runtime.
 func extractCommandTemplates(is *unstructured.Unstructured, runtime, instruction string) ([]string, error) {
 	// Preferred: nested maps
 	if m1, found, _ := unstructured.NestedMap(is.Object, "spec", "execTemplates", runtime, instruction); found {
@@ -500,25 +503,37 @@ func extractCommandTemplates(is *unstructured.Unstructured, runtime, instruction
 			}
 		}
 	}
-	// Fallback: iterate spec.instructions (array of objects)
-	if arr, found, _ := unstructured.NestedSlice(is.Object, "spec", "instructions"); found {
-		for _, it := range arr {
-			if mm, ok := it.(map[string]any); ok {
-				r := nestedStringOr(mm, "", "runtime")
-				in := nestedStringOr(mm, "", "instruction")
-				if r == runtime && in == instruction {
-					if m, found, _ := unstructured.NestedMap(mm, "execTemplate"); found {
-						if cmds, ok := m["command"]; ok {
-							if a, ok := cmds.([]any); ok {
-								return toStringSlice(a)
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	return nil, fmt.Errorf("execTemplate.command not found for runtime=%s instruction=%s", runtime, instruction)
+    // Fallback: iterate spec.instructions (array of objects)
+    if arr, found, _ := unstructured.NestedSlice(is.Object, "spec", "instructions"); found {
+        // Optionally read top-level runtime for shape (B)
+        topRuntime := nestedStringOr(is.Object, "", "spec", "runtime")
+        for _, it := range arr {
+            mm, ok := it.(map[string]any)
+            if !ok {
+                continue
+            }
+            // Shape A: explicit runtime/instruction fields
+            r := nestedStringOr(mm, "", "runtime")
+            in := nestedStringOr(mm, "", "instruction")
+            // Shape B: use name as instruction, runtime from spec.runtime
+            if r == "" {
+                r = topRuntime
+            }
+            if in == "" {
+                in = nestedStringOr(mm, "", "name")
+            }
+            if r == runtime && in == instruction {
+                if m, found, _ := unstructured.NestedMap(mm, "execTemplate"); found {
+                    if cmds, ok := m["command"]; ok {
+                        if a, ok := cmds.([]any); ok {
+                            return toStringSlice(a)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return nil, fmt.Errorf("execTemplate.command not found for runtime=%s instruction=%s", runtime, instruction)
 }
 
 func toStringSlice(a []any) ([]string, error) {

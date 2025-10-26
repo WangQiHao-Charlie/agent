@@ -1,0 +1,22 @@
+apiVersion: risc.dev/v1alpha1
+kind: InstructionSet
+metadata:
+  name: wasmtime
+spec:
+  runtime: exec
+  version: v0.1.0
+  # Only the keys listed here are exposed to templates
+  paramsSchema:
+    type: object
+    properties:
+      module:
+        type: string
+        description: Absolute path to the .wasm module inside the Driver pod
+  execTemplates:
+    exec:
+      # Run a WASI module with wasmtime. The Driver must allow `/usr/bin/wasmtime`.
+      run:
+        command:
+          - /usr/bin/wasmtime
+          - "{{ .Params.module }}"
+

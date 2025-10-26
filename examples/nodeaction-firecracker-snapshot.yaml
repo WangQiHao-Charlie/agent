@@ -1,0 +1,25 @@
+# NOTE: This example expects an InstructionSet with a `snapshot` instruction.
+# The firectl-based example (examples/instructionset-firecracker.yaml) only defines `run`.
+# Keep this file if you plan to extend the InstructionSet to call Firecracker's API for snapshots.
+apiVersion: risc.dev/v1alpha1
+kind: NodeAction
+metadata:
+  name: firecracker-snapshot-demo
+  namespace: default
+  # Optional label to support agents configured with NA_NODE_LABEL=risc.dev/node
+  labels:
+    risc.dev/node: "YOUR_NODE_NAME"
+spec:
+  nodeName: "YOUR_NODE_NAME"
+  # Unique ID for idempotence on the driver side
+  executionID: fc-snap-001
+  timeoutSeconds: 30
+  # SubjectID should map to your VM identifier; the controller can fill this
+  # from Pod annotations via ActionRequest fanout, but here we set directly.
+  resolvedSubjectID: vm-001
+  instructionRef:
+    name: firecracker
+    runtime: exec
+    instruction: snapshot
+  # No params required by templates; whitelist exists for future extensions.
+  params: {}

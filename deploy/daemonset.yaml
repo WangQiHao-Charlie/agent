@@ -16,7 +16,7 @@ spec:
       containers:
         - name: agent
           image: ghcr.io/wangqihao-charlie/kuberisc-agent:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           args:
             - --metrics-addr=:8080
           env:
@@ -24,14 +24,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-        - name: AGENT_CONCURRENCY
-          value: "4"
-        # Optional: use labelSelector for server-side filtering (recommended for CRDs)
-        - name: NA_NODE_LABEL
-          value: "risc.dev/node"
-        # gRPC runtime driver endpoint (using UDS on host)
-        - name: DRIVER_ADDR
-          value: "unix:///var/run/driverd/runtime-driver.grpc"
+            - name: AGENT_CONCURRENCY
+              value: "4"
+            # Optional: use labelSelector for server-side filtering (recommended for CRDs)
+            - name: NA_NODE_LABEL
+              value: "risc.dev/node"
+            # gRPC runtime driver endpoint (using UDS on host)
+            - name: DRIVER_ADDR
+              value: "unix:///var/run/driverd/runtime-driver.grpc"
             - name: DRIVER_INSECURE
               value: "true"
             # Configure CRD GVRs if different from defaults

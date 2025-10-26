@@ -1,0 +1,22 @@
+apiVersion: risc.dev/v1alpha1
+kind: NodeAction
+metadata:
+  name: firecracker-run-demo
+  namespace: default
+  labels:
+    risc.dev/node: "YOUR_NODE_NAME"
+spec:
+  nodeName: "YOUR_NODE_NAME"
+  executionID: fc-run-001
+  timeoutSeconds: 120
+  resolvedSubjectID: vm-001
+  instructionRef:
+    name: firecracker
+    runtime: exec
+    instruction: run
+  params:
+    kernel: /var/lib/firecracker/vmlinux
+    rootfs: /var/lib/firecracker/rootfs.ext4
+    vcpu: "1"
+    memMiB: "512"
+

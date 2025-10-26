@@ -23,6 +23,10 @@ spec:
             properties:
               runtime: { type: string }
               version: { type: string }
+              # Allow parameter whitelist schemas. Keep permissive for MVP.
+              paramsSchema:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               instructions:
                 type: array
                 items:
@@ -38,3 +42,8 @@ spec:
                         command:
                           type: array
                           items: { type: string }
+              # Preferred structure for command templates used by the agent:
+              # spec.execTemplates.<runtime>.<instruction>.command: []string
+              execTemplates:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true

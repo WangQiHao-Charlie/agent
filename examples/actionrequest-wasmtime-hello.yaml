@@ -1,0 +1,33 @@
+apiVersion: risc.dev/v1alpha1
+kind: ActionRequest
+metadata:
+  name: wasmtime-hello
+  namespace: default
+spec:
+  instructionRef:
+    name: wasmtime
+    runtime: exec
+    instruction: run
+  # Required param: path to the wasm module inside the Driver pod/container.
+  # Example: mount a ConfigMap or volume to the driver pod at /opt/wasm/hello.wasm
+  params:
+    module: /opt/wasm/hello.wasm
+  selector:
+    podSelector:
+      # Select any pod(s) in this namespace to fan out to. Replace to match your target pod(s).
+      app: demo
+  strategy:
+    parallelism: 1
+    retryLimit: 0
+    completionPolicy:
+      type: All
+  timeoutSeconds: 30
+  ttlSecondsAfterFinished: 60
+
+# Usage notes:
+# - Label one or more pods in the same namespace: `kubectl -n default label pod <pod> app=demo --overwrite`
+# - Ensure your Runtime Driver container has `/usr/bin/wasmtime` available and allowed by its binary allowlist,
+#   and the module file `/opt/wasm/hello.wasm` is present (e.g., via ConfigMap or volume mount).
+# - Apply InstructionSet first: `kubectl apply -f agent/examples/instructionset-wasmtime.yaml`
+# - Then apply this ActionRequest:   `kubectl apply -f agent/examples/actionrequest-wasmtime-hello.yaml`
+# - Observe: `kubectl get nodeaction -A` and describe to see stdoutTail.

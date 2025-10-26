@@ -1,0 +1,47 @@
+apiVersion: risc.dev/v1alpha1
+kind: InstructionSet
+metadata:
+  name: firecracker
+spec:
+  runtime: exec
+  version: v0.1.0
+  # Optional param whitelist (only keys listed here are exposed to templates)
+  paramsSchema:
+    type: object
+    properties:
+      snapshotDir:
+        type: string
+      apiSock:
+        type: string
+      kernel:
+        type: string
+      rootfs:
+        type: string
+      vcpu:
+        type: string
+      memMiB:
+        type: string
+  # Command templates for exec runtime. The agent will render these and pass argv
+  # to the external Runtime Driver via params["_argv"]. The driver should execute
+  # the argv (no shell).
+  execTemplates:
+    exec:
+      # Run a VM with firectl. Required params: kernel, rootfs, vcpu, memMiB
+      # This is a simple demo; adjust flags to your environment.
+      run:
+        command:
+          - /usr/local/bin/firectl
+          - --kernel
+          - "{{ .Params.kernel }}"
+          - --root-drive
+          - "{{ .Params.rootfs }}"
+          - --ncpus
+          - "{{ .Params.vcpu }}"
+          - --memory
+          - "{{ .Params.memMiB }}"
+          - --socket-path
+          - "/run/firecracker/{{ .SubjectID }}.sock"
+          - --metadata
+          - "id={{ .SubjectID }}"
+          - --kernel-opts
+          - "console=ttyS0 reboot=k panic=1 pci=off"
